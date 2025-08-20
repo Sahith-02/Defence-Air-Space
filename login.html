@@ -90,7 +90,7 @@
           />
           <button class="btn" type="submit">Login</button>
           <div class="hint">
-            Demo creds: <code>admin</code> / <code>secret123</code>
+            Demo creds: <code>admin</code> / <code>admin123</code>
           </div>
         </form>
       </div>
@@ -98,7 +98,7 @@
 
     <script>
       const VALID_USER = "admin";
-      const VALID_PASS = "secret123";
+      const VALID_PASS = "admin123";
       document.getElementById("loginForm").addEventListener("submit", (e) => {
         e.preventDefault();
         const u = username.value.trim();
@@ -107,7 +107,7 @@
           sessionStorage.setItem("loggedIn", "1");
           location.href = "index.html";
         } else {
-          alert("Invalid credentials. Try admin / secret123.");
+          alert("Invalid credentials. Try admin / admin123.");
         }
       });
     </script>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Login • Raster Compare</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #0b1220;
+        --card: #141c2f;
+        --accent: #2dd4bf;
+        --text: #e6eefc;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.4 system-ui, Segoe UI, Roboto, Helvetica, Arial;
+      }
+      .wrap {
+        min-height: 100svh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: var(--card);
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: 22px;
+      }
+      label {
+        display: block;
+        margin: 12px 0 6px;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border: 1px solid #22304d;
+        background: #0f1627;
+        color: var(--text);
+        border-radius: 10px;
+      }
+      .btn {
+        margin-top: 18px;
+        width: 100%;
+        padding: 12px 14px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--accent);
+        color: #062022;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .hint {
+        opacity: 0.8;
+        font-size: 13px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Sign in</h1>
+        <form id="loginForm">
+          <label for="username">Username</label>
+          <input
+            id="username"
+            autocomplete="username"
+            placeholder="e.g. admin"
+            required
+          />
+          <label for="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+            required
+          />
+          <button class="btn" type="submit">Login</button>
+          <div class="hint">
+            Demo creds: <code>admin</code> / <code>secret123</code>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const VALID_USER = "admin";
+      const VALID_PASS = "secret123";
+      document.getElementById("loginForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const u = username.value.trim();
+        const p = password.value;
+        if (u === VALID_USER && p === VALID_PASS) {
+          sessionStorage.setItem("loggedIn", "1");
+          location.href = "index.html";
+        } else {
+          alert("Invalid credentials. Try admin / secret123.");
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Raster Compare • Mapbox</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-compare/v0.4.0/mapbox-gl-compare.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-compare/v0.4.0/mapbox-gl-compare.js"></script>
+
+    <style>
+      :root {
+        --bg: #0b1220;
+        --card: #141c2f;
+        --accent: #2dd4bf;
+        --text: #e6eefc;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 system-ui, Segoe UI, Roboto, Helvetica, Arial;
+      }
+      #compare-container {
+        position: absolute;
+        inset: 0;
+      }
+      #left,
+      #right {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+
+      .control {
+        position: absolute;
+        z-index: 10;
+        background: var(--card);
+        border-radius: 10px;
+        padding: 8px 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        border: 1px solid #22304d;
+        color: var(--text);
+      }
+      .control select {
+        width: 260px;
+        background: #0f1627;
+        color: var(--text);
+        border: 1px solid #22304d;
+        border-radius: 8px;
+        padding: 8px;
+      }
+      .control-left {
+        left: 10px;
+        top: 10px;
+      }
+      .control-right {
+        right: 10px;
+        top: 10px;
+      }
+
+      .logout {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+      }
+      .logout button {
+        background: #e11d48;
+        color: #fff;
+        border: 0;
+        border-radius: 10px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .toast {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 16px;
+        background: #1f2937;
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 8px;
+        opacity: 0.95;
+        z-index: 20;
+        display: none;
+      }
+      .spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid #fff;
+        border-right-color: transparent;
+        border-radius: 50%;
+        margin-left: 6px;
+        vertical-align: -2px;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* 3D controls panel */
+      .controls-3d {
+        position: absolute;
+        right: 10px;
+        bottom: 60px;
+        z-index: 11;
+        background: var(--card);
+        border: 1px solid #22304d;
+        border-radius: 12px;
+        padding: 10px;
+        min-width: 240px;
+        display: none;
+      }
+      .controls-3d h4 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+      .controls-3d label {
+        display: block;
+        font-size: 12px;
+        margin: 6px 0 2px;
+        color: #aab6d1;
+      }
+      .controls-3d input[type="range"] {
+        width: 100%;
+      }
+      .btn-3d {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        z-index: 11;
+        background: #0ea5e9;
+        border: 0;
+        color: #001018;
+        padding: 8px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .btn-3d.off {
+        background: #60a5fa;
+        color: #03142b;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      if (sessionStorage.getItem("loggedIn") !== "1")
+        location.href = "login.html";
+    </script>
+
+    <div class="control control-left">
+      <select id="leftSelect"></select>
+    </div>
+    <div class="control control-right">
+      <select id="rightSelect"></select>
+    </div>
+
+    <div id="compare-container">
+      <div id="left"></div>
+      <div id="right"></div>
+    </div>
+
+    <button id="toggle3d" class="btn-3d off" title="Toggle 3D terrain">
+      Switch to 3D
+    </button>
+    <div id="panel3d" class="controls-3d">
+      <h4>3D View</h4>
+      <label for="pitchCtl">Pitch (°)</label>
+      <input id="pitchCtl" type="range" min="0" max="85" value="80" />
+      <!-- your screenshot shows ~60 -->
+
+      <label for="bearingCtl">Bearing (°)</label>
+      <input id="bearingCtl" type="range" min="0" max="360" value="90" />
+      <!-- roughly east-facing -->
+
+      <label for="exCtl">Terrain exaggeration (×)</label>
+      <input id="exCtl" type="range" min="1" max="8" step="0.5" value="3" />
+      <!-- your screenshot shows ~3 -->
+    </div>
+
+    <div class="logout">
+      <button
+        onclick="sessionStorage.removeItem('loggedIn'); location.href='login.html'"
+      >
+        Logout
+      </button>
+    </div>
+    <div id="toast" class="toast"></div>
+
+    <script>
+      mapboxgl.accessToken =
+        "pk.eyJ1IjoicmF5YXBhdGk0OSIsImEiOiJjbGVvMWp6OGIwajFpM3luNTBqZHhweXZzIn0.1r2DoIQ1Gf2K3e5WBgDNjA";
+
+      // Your tileset IDs. Labels can be anything; ids must be "username.id"
+      const RASTER_ITEMS = [
+        { label: "Sentinal-2 10M", id: "rayapati49.sentinel10m" },
+        { label: "SPOT Multispectral 6M", id: "rayapati49.spot6m" },
+        { label: "Sentinal-2(SR) 2.5M", id: "rayapati49.sentinelSR25m" },
+        { label: "SPOT Multispectral(SR) 1.5M", id: "rayapati49.spotmlsr05" },
+        { label: "SPOT Panchromatic 1.5M", id: "rayapati49.spotp5m" },
+        { label: "SPOT Panchromatic(SR) 0.75M", id: "rayapati49.spotprsr075" },
+        { label: "Drone Imagery", id: "rayapati49.kollur_drone" },
+      ];
+
+      // --- helpers ---
+      const toast = (msg, ms = 1800) => {
+        const t = document.getElementById("toast");
+        t.innerHTML = msg;
+        t.style.display = "block";
+        clearTimeout(window.__t);
+        window.__t = setTimeout(() => (t.style.display = "none"), ms);
+      };
+
+      function fillSelect(el) {
+        RASTER_ITEMS.forEach((item, i) => {
+          const opt = document.createElement("option");
+          opt.value = i;
+          opt.textContent = item.label;
+          el.appendChild(opt);
+        });
+      }
+
+      const mapOpts = {
+        style: "mapbox://styles/mapbox/satellite-streets-v12",
+        center: [78.9629, 20.5937],
+        zoom: 4,
+      };
+      const leftMap = new mapboxgl.Map({ container: "left", ...mapOpts });
+      const rightMap = new mapboxgl.Map({ container: "right", ...mapOpts });
+      leftMap.addControl(new mapboxgl.NavigationControl(), "bottom-left");
+      rightMap.addControl(new mapboxgl.NavigationControl(), "bottom-right");
+      const compare = new mapboxgl.Compare(
+        leftMap,
+        rightMap,
+        "#compare-container"
+      );
+
+      leftMap.on("error", (e) => {
+        console.error("Left map error:", e.error);
+        toast("Left map error. Check console.");
+      });
+      rightMap.on("error", (e) => {
+        console.error("Right map error:", e.error);
+        toast("Right map error. Check console.");
+      });
+
+      // === Auto-fetch TileJSON (bounds/minzoom/maxzoom) for each tileset ===
+      const metaCache = new Map(); // id -> {bounds, minzoom, maxzoom, tilejsonUrl}
+      async function fetchTileJSON(tilesetId) {
+        if (metaCache.has(tilesetId)) return metaCache.get(tilesetId);
+        const url = `https://api.mapbox.com/v4/${tilesetId}.json?secure&access_token=${mapboxgl.accessToken}`;
+        const res = await fetch(url);
+        if (!res.ok)
+          throw new Error(
+            `TileJSON fetch failed for ${tilesetId}: ${res.status}`
+          );
+        const tj = await res.json();
+        const meta = {
+          url: `mapbox://${tilesetId}`,
+          bounds: tj.bounds || null,
+          minzoom: typeof tj.minzoom === "number" ? tj.minzoom : 0,
+          maxzoom: typeof tj.maxzoom === "number" ? tj.maxzoom : 22,
+          tilejsonUrl: url,
+        };
+        metaCache.set(tilesetId, meta);
+        return meta;
+      }
+      async function ensureMeta(item) {
+        if (item.meta) return item.meta;
+        const spinner = '<span class="spinner"></span>';
+        toast(`Loading metadata for ${item.label}${spinner}`, 4000);
+        const meta = await fetchTileJSON(item.id).catch((err) => {
+          console.error(err);
+          toast(`Failed to load ${item.label} metadata`, 2500);
+          return null;
+        });
+        item.meta = meta;
+        return meta;
+      }
+      function addRasterLayer(map, side, meta) {
+        const srcId = `${side}-raster-src`;
+        const lyrId = `${side}-raster-lyr`;
+        if (map.getLayer(lyrId)) map.removeLayer(lyrId);
+        if (map.getSource(srcId)) map.removeSource(srcId);
+        map.addSource(srcId, { type: "raster", url: meta.url, tileSize: 256 });
+        map.addLayer({
+          id: lyrId,
+          type: "raster",
+          source: srcId,
+          paint: { "raster-opacity": 1 },
+        });
+      }
+      async function applyRaster(map, side, itemIndex, fly = true) {
+        const item = RASTER_ITEMS[itemIndex];
+        const meta = await ensureMeta(item);
+        if (!meta) return;
+        addRasterLayer(map, side, meta);
+        if (fly && meta.bounds)
+          map.fitBounds(meta.bounds, { padding: 40, duration: 600 });
+      }
+
+      const leftSelect = document.getElementById("leftSelect");
+      const rightSelect = document.getElementById("rightSelect");
+      fillSelect(leftSelect);
+      fillSelect(rightSelect);
+      leftSelect.value = "0";
+      rightSelect.value = "1";
+
+      leftMap.on("load", () =>
+        applyRaster(leftMap, "left", parseInt(leftSelect.value, 10), true)
+      );
+      rightMap.on("load", () =>
+        applyRaster(rightMap, "right", parseInt(rightSelect.value, 10), false)
+      );
+
+      leftSelect.addEventListener("change", () =>
+        applyRaster(leftMap, "left", parseInt(leftSelect.value, 10), true)
+      );
+      rightSelect.addEventListener("change", () =>
+        applyRaster(rightMap, "right", parseInt(rightSelect.value, 10), true)
+      );
+
+      // =========================
+      // 3D TOGGLE + CONTROLS
+      // =========================
+      const toggle3dBtn = document.getElementById("toggle3d");
+      const panel3d = document.getElementById("panel3d");
+      const pitchCtl = document.getElementById("pitchCtl");
+      const bearingCtl = document.getElementById("bearingCtl");
+      const exCtl = document.getElementById("exCtl");
+      let is3D = false;
+
+      function ensureTerrain(map) {
+        if (!map.getSource("mapbox-dem")) {
+          map.addSource("mapbox-dem", {
+            type: "raster-dem",
+            url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+            tileSize: 512,
+            maxzoom: 30,
+          });
+        }
+      }
+      function setTerrain(map, ex) {
+        ensureTerrain(map);
+        map.setTerrain({ source: "mapbox-dem", exaggeration: ex });
+        // optional sky (looks nicer in 3D)
+        if (!map.getLayer("sky")) {
+          map.addLayer({
+            id: "sky",
+            type: "sky",
+            paint: {
+              "sky-type": "atmosphere",
+              "sky-atmosphere-sun": [0.0, 0.0],
+              "sky-atmosphere-sun-intensity": 15,
+            },
+          });
+        }
+      }
+      function clearTerrain(map) {
+        // Remove sky first (optional)
+        if (map.getLayer("sky")) map.removeLayer("sky");
+        map.setTerrain(null);
+      }
+      function applyCameraTo(map, pitch, bearing) {
+        map.easeTo({ pitch, bearing, duration: 400 });
+      }
+
+      function set3D(on) {
+        is3D = on;
+        if (on) {
+          const pitch = Number(pitchCtl.value) || 80;
+          const bear = Number(bearingCtl.value) || 35;
+          const ex = Number(exCtl.value) || 5;
+
+          if (leftMap.isStyleLoaded()) setTerrain(leftMap, ex);
+          else leftMap.once("load", () => setTerrain(leftMap, ex));
+          if (rightMap.isStyleLoaded()) setTerrain(rightMap, ex);
+          else rightMap.once("load", () => setTerrain(rightMap, ex));
+
+          applyCameraTo(leftMap, pitch, bear);
+          applyCameraTo(rightMap, pitch, bear);
+
+          toggle3dBtn.textContent = "Switch to 2D";
+          toggle3dBtn.classList.remove("off");
+          panel3d.style.display = "block";
+        } else {
+          if (leftMap.isStyleLoaded()) clearTerrain(leftMap);
+          else leftMap.once("load", () => clearTerrain(leftMap));
+          if (rightMap.isStyleLoaded()) clearTerrain(rightMap);
+          else rightMap.once("load", () => clearTerrain(rightMap));
+
+          applyCameraTo(leftMap, 0, leftMap.getBearing());
+          applyCameraTo(rightMap, 0, rightMap.getBearing());
+
+          toggle3dBtn.textContent = "Switch to 3D";
+          toggle3dBtn.classList.add("off");
+          panel3d.style.display = "none";
+        }
+      }
+
+      toggle3dBtn.addEventListener("click", () => set3D(!is3D));
+
+      // Live controls
+      pitchCtl.addEventListener("input", (e) => {
+        if (is3D)
+          applyCameraTo(leftMap, Number(e.target.value), leftMap.getBearing());
+        if (is3D)
+          applyCameraTo(
+            rightMap,
+            Number(e.target.value),
+            rightMap.getBearing()
+          );
+      });
+      bearingCtl.addEventListener("input", (e) => {
+        if (is3D)
+          applyCameraTo(leftMap, leftMap.getPitch(), Number(e.target.value));
+        if (is3D)
+          applyCameraTo(rightMap, rightMap.getPitch(), Number(e.target.value));
+      });
+      exCtl.addEventListener("input", (e) => {
+        if (is3D) {
+          setTerrain(leftMap, Number(e.target.value));
+          setTerrain(rightMap, Number(e.target.value));
+        }
+      });
+    </script>
+  </body>
+</html>

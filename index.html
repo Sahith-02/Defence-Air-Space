@@ -118,7 +118,6 @@
         }
       }
 
-      /* 3D controls panel */
       .controls-3d {
         position: absolute;
         right: 10px;
@@ -144,6 +143,7 @@
       .controls-3d input[type="range"] {
         width: 100%;
       }
+
       .btn-3d {
         position: absolute;
         right: 10px;
@@ -187,16 +187,11 @@
     <div id="panel3d" class="controls-3d">
       <h4>3D View</h4>
       <label for="pitchCtl">Pitch (°)</label>
-      <input id="pitchCtl" type="range" min="0" max="85" value="80" />
-      <!-- your screenshot shows ~60 -->
-
+      <input id="pitchCtl" type="range" min="0" max="85" value="60" />
       <label for="bearingCtl">Bearing (°)</label>
       <input id="bearingCtl" type="range" min="0" max="360" value="90" />
-      <!-- roughly east-facing -->
-
       <label for="exCtl">Terrain exaggeration (×)</label>
-      <input id="exCtl" type="range" min="1" max="8" step="0.5" value="3" />
-      <!-- your screenshot shows ~3 -->
+      <input id="exCtl" type="range" min="1" max="8" step="0.5" value="6" />
     </div>
 
     <div class="logout">
@@ -212,11 +207,13 @@
       mapboxgl.accessToken =
         "pk.eyJ1IjoicmF5YXBhdGk0OSIsImEiOiJjbGVvMWp6OGIwajFpM3luNTBqZHhweXZzIn0.1r2DoIQ1Gf2K3e5WBgDNjA";
 
-      // Your tileset IDs. Labels can be anything; ids must be "username.id"
+      const SENTINEL10_ID = "rayapati49.daawmjez";
+      const SENTINELSR_ID = "rayapati49.sentinelSR25m";
+
       const RASTER_ITEMS = [
-        { label: "Sentinal-2 10M", id: "rayapati49.daawmjez" },
+        { label: "Sentinal-2 10M", id: SENTINEL10_ID },
         { label: "SPOT Multispectral 6M", id: "rayapati49.spot6m" },
-        { label: "Sentinal-2(SR) 2.5M", id: "rayapati49.sentinelSR25m" },
+        { label: "Sentinal-2(SR) 2.5M", id: SENTINELSR_ID },
         { label: "SPOT Multispectral(SR) 1.5M", id: "rayapati49.spotmlsr05" },
         { label: "SPOT Panchromatic 1.5M", id: "rayapati49.spotp5m" },
         { label: "SPOT Panchromatic(SR) 0.75M", id: "rayapati49.spotprsr075" },
@@ -242,14 +239,18 @@
       }
 
       const mapOpts = {
-        style: "mapbox://styles/mapbox/satellite-streets-v12",
+        style: "mapbox://styles/mapbox/streets-v12",
         center: [78.9629, 20.5937],
         zoom: 4,
+        antialias: true, // nicer 3D rendering
       };
       const leftMap = new mapboxgl.Map({ container: "left", ...mapOpts });
       const rightMap = new mapboxgl.Map({ container: "right", ...mapOpts });
       leftMap.addControl(new mapboxgl.NavigationControl(), "bottom-left");
       rightMap.addControl(new mapboxgl.NavigationControl(), "bottom-right");
+      leftMap.setMaxPitch(85);
+      rightMap.setMaxPitch(85);
+
       const compare = new mapboxgl.Compare(
         leftMap,
         rightMap,
@@ -265,8 +266,9 @@
         toast("Right map error. Check console.");
       });
 
-      // === Auto-fetch TileJSON (bounds/minzoom/maxzoom) for each tileset ===
-      const metaCache = new Map(); // id -> {bounds, minzoom, maxzoom, tilejsonUrl}
+      // === Auto-fetch TileJSON (bounds/minzoom/maxzoom) ===
+      const metaCache = new Map();
+
       async function fetchTileJSON(tilesetId) {
         if (metaCache.has(tilesetId)) return metaCache.get(tilesetId);
         const url = `https://api.mapbox.com/v4/${tilesetId}.json?secure&access_token=${mapboxgl.accessToken}`;
@@ -286,23 +288,42 @@
         metaCache.set(tilesetId, meta);
         return meta;
       }
+
       async function ensureMeta(item) {
         if (item.meta) return item.meta;
         const spinner = '<span class="spinner"></span>';
         toast(`Loading metadata for ${item.label}${spinner}`, 4000);
-        const meta = await fetchTileJSON(item.id).catch((err) => {
+
+        let meta = await fetchTileJSON(item.id).catch((err) => {
           console.error(err);
           toast(`Failed to load ${item.label} metadata`, 2500);
           return null;
         });
+        if (!meta) {
+          item.meta = null;
+          return null;
+        }
+
+        // SPECIAL-CASE: reuse bounds from S2 10M for SR 2.5M
+        if (item.id === SENTINELSR_ID) {
+          try {
+            const s2meta = await fetchTileJSON(SENTINEL10_ID);
+            if (s2meta && s2meta.bounds)
+              meta = { ...meta, bounds: s2meta.bounds };
+          } catch (e) {
+            console.warn("Could not reuse bounds from 10M:", e);
+          }
+        }
         item.meta = meta;
         return meta;
       }
+
       function addRasterLayer(map, side, meta) {
         const srcId = `${side}-raster-src`;
         const lyrId = `${side}-raster-lyr`;
         if (map.getLayer(lyrId)) map.removeLayer(lyrId);
         if (map.getSource(srcId)) map.removeSource(srcId);
+
         map.addSource(srcId, { type: "raster", url: meta.url, tileSize: 256 });
         map.addLayer({
           id: lyrId,
@@ -311,13 +332,45 @@
           paint: { "raster-opacity": 1 },
         });
       }
+
+      // ---------- Camera sync helpers ----------
+      let is3D = false; // global flag used for sync decisions
+
+      // FIX: move both maps to the same bounds to keep 3D perspective aligned
+      function fitBothToBounds(bounds, padding = 40, duration = 600) {
+        // stop any ongoing animations before syncing
+        [leftMap, rightMap].forEach((m) => m.stop());
+        leftMap.fitBounds(bounds, { padding, duration });
+        rightMap.fitBounds(bounds, { padding, duration });
+      }
+
+      // FIX: copy full camera state from one map to the other instantly
+      function syncCamera(from, to, instant = true) {
+        const state = {
+          center: from.getCenter(),
+          zoom: from.getZoom(),
+          bearing: from.getBearing(),
+          pitch: from.getPitch(),
+          duration: instant ? 0 : 300,
+        };
+        to.easeTo(state);
+      }
+
       async function applyRaster(map, side, itemIndex, fly = true) {
         const item = RASTER_ITEMS[itemIndex];
         const meta = await ensureMeta(item);
         if (!meta) return;
+
         addRasterLayer(map, side, meta);
-        if (fly && meta.bounds)
-          map.fitBounds(meta.bounds, { padding: 40, duration: 600 });
+
+        if (fly && meta.bounds) {
+          // FIX: if in 3D, keep both maps aligned by moving both
+          if (is3D) {
+            fitBothToBounds(meta.bounds, 40, 600);
+          } else {
+            map.fitBounds(meta.bounds, { padding: 40, duration: 600 });
+          }
+        }
       }
 
       const leftSelect = document.getElementById("leftSelect");
@@ -325,21 +378,7 @@
       fillSelect(leftSelect);
       fillSelect(rightSelect);
       leftSelect.value = "0";
-      rightSelect.value = "1";
-
-      leftMap.on("load", () =>
-        applyRaster(leftMap, "left", parseInt(leftSelect.value, 10), true)
-      );
-      rightMap.on("load", () =>
-        applyRaster(rightMap, "right", parseInt(rightSelect.value, 10), false)
-      );
-
-      leftSelect.addEventListener("change", () =>
-        applyRaster(leftMap, "left", parseInt(leftSelect.value, 10), true)
-      );
-      rightSelect.addEventListener("change", () =>
-        applyRaster(rightMap, "right", parseInt(rightSelect.value, 10), true)
-      );
+      rightSelect.value = "0";
 
       // =========================
       // 3D TOGGLE + CONTROLS
@@ -349,7 +388,6 @@
       const pitchCtl = document.getElementById("pitchCtl");
       const bearingCtl = document.getElementById("bearingCtl");
       const exCtl = document.getElementById("exCtl");
-      let is3D = false;
 
       function ensureTerrain(map) {
         if (!map.getSource("mapbox-dem")) {
@@ -357,14 +395,13 @@
             type: "raster-dem",
             url: "mapbox://mapbox.mapbox-terrain-dem-v1",
             tileSize: 512,
-            maxzoom: 30,
+            maxzoom: 14,
           });
         }
       }
       function setTerrain(map, ex) {
         ensureTerrain(map);
         map.setTerrain({ source: "mapbox-dem", exaggeration: ex });
-        // optional sky (looks nicer in 3D)
         if (!map.getLayer("sky")) {
           map.addLayer({
             id: "sky",
@@ -378,7 +415,6 @@
         }
       }
       function clearTerrain(map) {
-        // Remove sky first (optional)
         if (map.getLayer("sky")) map.removeLayer("sky");
         map.setTerrain(null);
       }
@@ -389,26 +425,42 @@
       function set3D(on) {
         is3D = on;
         if (on) {
-          const pitch = Number(pitchCtl.value) || 80;
-          const bear = Number(bearingCtl.value) || 35;
-          const ex = Number(exCtl.value) || 5;
+          [leftMap, rightMap].forEach((m) => m.stop());
 
-          if (leftMap.isStyleLoaded()) setTerrain(leftMap, ex);
-          else leftMap.once("load", () => setTerrain(leftMap, ex));
-          if (rightMap.isStyleLoaded()) setTerrain(rightMap, ex);
-          else rightMap.once("load", () => setTerrain(rightMap, ex));
+          // read defaults from sliders
+          const pitch = Number(pitchCtl.value) || 60;
+          const bear = Number(bearingCtl.value) || 90;
+          const ex = Number(exCtl.value) || 6;
 
-          applyCameraTo(leftMap, pitch, bear);
-          applyCameraTo(rightMap, pitch, bear);
+          // FIX: hard-sync camera before enabling terrain to avoid split mismatch
+          syncCamera(leftMap, rightMap, true);
+
+          const enable = (m) => {
+            if (m.isStyleLoaded()) setTerrain(m, ex);
+            else m.once("load", () => setTerrain(m, ex));
+          };
+          enable(leftMap);
+          enable(rightMap);
+
+          // apply camera instantly to match defaults
+          leftMap.easeTo({ pitch, bearing: bear, duration: 0 });
+          rightMap.easeTo({ pitch, bearing: bear, duration: 0 });
+
+          // default zoom for 3D (sync both)
+          [leftMap, rightMap].forEach((m) =>
+            m.flyTo({ zoom: 15, duration: 600 })
+          );
 
           toggle3dBtn.textContent = "Switch to 2D";
           toggle3dBtn.classList.remove("off");
           panel3d.style.display = "block";
         } else {
-          if (leftMap.isStyleLoaded()) clearTerrain(leftMap);
-          else leftMap.once("load", () => clearTerrain(leftMap));
-          if (rightMap.isStyleLoaded()) clearTerrain(rightMap);
-          else rightMap.once("load", () => clearTerrain(rightMap));
+          const disable = (m) => {
+            if (m.isStyleLoaded()) clearTerrain(m);
+            else m.once("load", () => clearTerrain(m));
+          };
+          disable(leftMap);
+          disable(rightMap);
 
           applyCameraTo(leftMap, 0, leftMap.getBearing());
           applyCameraTo(rightMap, 0, rightMap.getBearing());
@@ -421,29 +473,57 @@
 
       toggle3dBtn.addEventListener("click", () => set3D(!is3D));
 
-      // Live controls
+      // Live controls (instant and interruptible)
       pitchCtl.addEventListener("input", (e) => {
-        if (is3D)
-          applyCameraTo(leftMap, Number(e.target.value), leftMap.getBearing());
-        if (is3D)
-          applyCameraTo(
-            rightMap,
-            Number(e.target.value),
-            rightMap.getBearing()
-          );
+        if (!is3D) return;
+        const v = Number(e.target.value);
+        [leftMap, rightMap].forEach((m) => {
+          m.stop();
+          m.easeTo({ pitch: v, duration: 0 });
+        });
       });
       bearingCtl.addEventListener("input", (e) => {
-        if (is3D)
-          applyCameraTo(leftMap, leftMap.getPitch(), Number(e.target.value));
-        if (is3D)
-          applyCameraTo(rightMap, rightMap.getPitch(), Number(e.target.value));
+        if (!is3D) return;
+        const v = Number(e.target.value);
+        [leftMap, rightMap].forEach((m) => {
+          m.stop();
+          m.easeTo({ bearing: v, duration: 0 });
+        });
       });
       exCtl.addEventListener("input", (e) => {
-        if (is3D) {
-          setTerrain(leftMap, Number(e.target.value));
-          setTerrain(rightMap, Number(e.target.value));
-        }
+        if (!is3D) return;
+        const ex = Number(e.target.value);
+        setTerrain(leftMap, ex);
+        setTerrain(rightMap, ex);
       });
+
+      // ====== load rasters then auto-enter 3D with defaults ======
+      let leftReady = false,
+        rightReady = false;
+
+      leftMap.on("load", () => {
+        applyRaster(leftMap, "left", parseInt(leftSelect.value, 10), true);
+        leftReady = true;
+        maybeStart3D();
+      });
+      rightMap.on("load", () => {
+        applyRaster(rightMap, "right", parseInt(rightSelect.value, 10), false);
+        rightReady = true;
+        maybeStart3D();
+      });
+
+      leftSelect.addEventListener("change", () =>
+        applyRaster(leftMap, "left", parseInt(leftSelect.value, 10), true)
+      );
+      rightSelect.addEventListener("change", () =>
+        applyRaster(rightMap, "right", parseInt(rightSelect.value, 10), true)
+      );
+
+      function maybeStart3D() {
+        if (leftReady && rightReady && !is3D) {
+          set3D(true); // use current slider defaults on first load
+        }
+      }
     </script>
   </body>
 </html>
